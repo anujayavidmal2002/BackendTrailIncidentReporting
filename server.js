@@ -4,7 +4,7 @@ const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
 const crypto = require("crypto");
-const mongoose = require("mongoose");
+const { Sequelize, DataTypes } = require("sequelize");
 const {
   S3Client,
   PutObjectCommand,
@@ -15,48 +15,109 @@ const exifr = require("exifr");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI;
-if (!MONGODB_URI) {
-  throw new Error("MONGODB_URI must be set in .env file");
+// PostgreSQL Connection using Sequelize
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error("DATABASE_URL must be set in .env file");
 }
 
-mongoose
-  .connect(MONGODB_URI)
+// Check if it's a local or remote database
+const isLocalDB = DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1');
+
+const sequelize = new Sequelize(DATABASE_URL, {
+  dialect: 'postgresql',
+  dialectOptions: isLocalDB ? {} : {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false
+    }
+  },
+  logging: false, // Set to console.log to see SQL queries
+  pool: {
+    max: 5,
+    min: 0,
+    acquire: 30000,
+    idle: 10000
+  }
+});
+
+// Test database connection
+sequelize.authenticate()
   .then(() => {
-    console.log("✅ Connected to MongoDB");
+    console.log("✅ Connected to PostgreSQL database");
   })
   .catch((err) => {
-    console.error("❌ MongoDB connection error:", err.message);
+    console.error("❌ PostgreSQL connection error:", err.message);
     process.exit(1);
   });
 
-// Define Incident Schema
-const incidentSchema = new mongoose.Schema({
-  type: { type: String, required: true },
-  description: { type: String, required: true },
-  location: { type: String },
-  locationText: { type: String },
-  latitude: { type: Number, default: null },
-  longitude: { type: Number, default: null },
-  severity: { type: String, required: true },
-  date: { type: String },
-  time: { type: String },
-  status: { type: String, default: "Open" },
-  photos: [
-    {
-      url: String,
-      key: String,
-      name: String,
-    },
-  ],
-  photoUrl: String,
-  photoKey: String,
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
+// Define Incident Model for PostgreSQL
+const Incident = sequelize.define('Incident', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  type: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: false
+  },
+  location: {
+    type: DataTypes.STRING
+  },
+  locationText: {
+    type: DataTypes.STRING
+  },
+  latitude: {
+    type: DataTypes.DOUBLE,
+    defaultValue: null
+  },
+  longitude: {
+    type: DataTypes.DOUBLE,
+    defaultValue: null
+  },
+  severity: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  date: {
+    type: DataTypes.STRING
+  },
+  time: {
+    type: DataTypes.STRING
+  },
+  status: {
+    type: DataTypes.STRING,
+    defaultValue: 'Open'
+  },
+  photos: {
+    type: DataTypes.JSONB, // PostgreSQL JSONB for array of photo objects
+    defaultValue: []
+  },
+  photoUrl: {
+    type: DataTypes.STRING
+  },
+  photoKey: {
+    type: DataTypes.STRING
+  }
+}, {
+  tableName: 'incidents',
+  timestamps: true, // Automatically adds createdAt and updatedAt
+  underscored: false // Use camelCase field names
 });
 
-const Incident = mongoose.model("Incident", incidentSchema);
+// Sync database (create tables if they don't exist)
+sequelize.sync()
+  .then(() => {
+    console.log("✅ Database tables synced");
+  })
+  .catch((err) => {
+    console.error("❌ Error syncing database:", err.message);
+  });
 
 const AWS_REGION = process.env.AWS_REGION;
 const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET;
@@ -217,20 +278,13 @@ async function extractGpsFromFiles(files = []) {
 app.use(cors());
 app.use(express.json());
 
-// Helper for finding incident by ID
-async function findIncident(id) {
-  try {
-    return await Incident.findById(id);
-  } catch (err) {
-    return null;
-  }
-}
-
 // --- ROUTES ---
 // Get all incidents
 app.get("/api/incidents", async (req, res) => {
   try {
-    const incidents = await Incident.find().sort({ createdAt: -1 });
+    const incidents = await Incident.findAll({
+      order: [['createdAt', 'DESC']]
+    });
     res.json(incidents);
   } catch (err) {
     console.error("Error fetching incidents:", err.message);
@@ -241,9 +295,9 @@ app.get("/api/incidents", async (req, res) => {
 // Get single incident
 app.get("/api/incidents/:id", async (req, res) => {
   try {
-    const inc = await findIncident(req.params.id);
-    if (!inc) return res.status(404).json({ error: "Incident not found" });
-    res.json(inc);
+    const incident = await Incident.findByPk(req.params.id);
+    if (!incident) return res.status(404).json({ error: "Incident not found" });
+    res.json(incident);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch incident" });
   }
@@ -391,7 +445,7 @@ app.post("/api/incidents", upload.array("photos", 5), async (req, res) => {
   }));
 
   try {
-    const incident = new Incident({
+    const incident = await Incident.create({
       type,
       description,
       location: resolvedLocationText,
@@ -405,12 +459,10 @@ app.post("/api/incidents", upload.array("photos", 5), async (req, res) => {
       photos,
       photoUrl: photos[0]?.url || null,
       photoKey: photos[0]?.key || null,
-      createdAt: now,
     });
 
-    const savedIncident = await incident.save();
-    console.log(`✅ Incident saved successfully with ID: ${savedIncident._id}`);
-    res.status(201).json(savedIncident);
+    console.log(`✅ Incident saved successfully with ID: ${incident.id}`);
+    res.status(201).json(incident);
   } catch (err) {
     console.error("Error creating incident:", err.message);
     res.status(500).json({ error: "Failed to create incident" });
@@ -420,8 +472,8 @@ app.post("/api/incidents", upload.array("photos", 5), async (req, res) => {
 // Update incident
 app.put("/api/incidents/:id", upload.array("photos", 5), async (req, res) => {
   try {
-    const inc = await findIncident(req.params.id);
-    if (!inc) {
+    const incident = await Incident.findByPk(req.params.id);
+    if (!incident) {
       return res.status(404).json({ error: "Incident not found" });
     }
 
@@ -434,42 +486,45 @@ app.put("/api/incidents/:id", upload.array("photos", 5), async (req, res) => {
       latitude,
       longitude,
     } = req.body;
-    if (type) inc.type = type;
-    if (description) inc.description = description;
-    if (location) inc.location = location;
-    if (severity) inc.severity = severity;
-    if (status) inc.status = status;
+    
+    if (type) incident.type = type;
+    if (description) incident.description = description;
+    if (location) incident.location = location;
+    if (severity) incident.severity = severity;
+    if (status) incident.status = status;
 
     if (latitude && longitude) {
-      inc.latitude = parseFloat(latitude);
-      inc.longitude = parseFloat(longitude);
+      incident.latitude = parseFloat(latitude);
+      incident.longitude = parseFloat(longitude);
     }
 
     const files = req.files || [];
     if (files.length) {
       try {
         const uploads = await Promise.all(files.map(uploadToS3));
-        if (inc.photos && inc.photos.length) {
-          await Promise.all(inc.photos.map((p) => deleteFromS3(p.key)));
-        } else if (inc.photoKey) {
-          await deleteFromS3(inc.photoKey);
+        
+        // Delete old photos from S3
+        if (incident.photos && incident.photos.length) {
+          await Promise.all(incident.photos.map((p) => deleteFromS3(p.key)));
+        } else if (incident.photoKey) {
+          await deleteFromS3(incident.photoKey);
         }
-        inc.photos = uploads.map((u, idx) => ({
+        
+        incident.photos = uploads.map((u, idx) => ({
           url: u.url,
           key: u.key,
           name: files[idx]?.originalname || "",
         }));
-        inc.photoUrl = inc.photos[0]?.url || null;
-        inc.photoKey = inc.photos[0]?.key || null;
+        incident.photoUrl = incident.photos[0]?.url || null;
+        incident.photoKey = incident.photos[0]?.key || null;
       } catch (err) {
         console.error("S3 upload failed (update):", err.message || err);
         return res.status(500).json({ error: "Image upload failed." });
       }
     }
 
-    inc.updatedAt = new Date();
-    const updatedIncident = await inc.save();
-    res.json(updatedIncident);
+    await incident.save();
+    res.json(incident);
   } catch (err) {
     console.error("Error updating incident:", err.message);
     res.status(500).json({ error: "Failed to update incident" });
@@ -479,18 +534,19 @@ app.put("/api/incidents/:id", upload.array("photos", 5), async (req, res) => {
 // Delete incident
 app.delete("/api/incidents/:id", async (req, res) => {
   try {
-    const incident = await findIncident(req.params.id);
+    const incident = await Incident.findByPk(req.params.id);
     if (!incident) {
       return res.status(404).json({ error: "Incident not found" });
     }
 
+    // Delete photos from S3
     if (incident.photos && incident.photos.length) {
       await Promise.all(incident.photos.map((p) => deleteFromS3(p.key)));
     } else if (incident.photoKey) {
       await deleteFromS3(incident.photoKey);
     }
 
-    await Incident.findByIdAndDelete(req.params.id);
+    await incident.destroy();
     res.json({ message: "Incident deleted." });
   } catch (err) {
     console.error("Error deleting incident:", err.message);
@@ -501,7 +557,7 @@ app.delete("/api/incidents/:id", async (req, res) => {
 // Stats endpoint
 app.get("/api/stats", async (req, res) => {
   try {
-    const incidents = await Incident.find();
+    const incidents = await Incident.findAll();
     const stats = {
       total: incidents.length,
       bySeverity: { Low: 0, Medium: 0, High: 0 },
@@ -525,7 +581,7 @@ app.get("/api/health", (req, res) => {
 
 // Root
 app.get("/", (req, res) => {
-  res.send("Trail Incident Reporting Backend Running.");
+  res.send("Trail Incident Reporting Backend Running with PostgreSQL.");
 });
 // Error handling
 app.use((err, req, res, next) => {
