@@ -1,6 +1,0 @@
-# Choreo Component Configuration for Dockerfile-based Service
-# Choreo will automatically detect and build the Dockerfile
-implementation:
-  container:
-    # Docker image name (Choreo builds from Dockerfile)
-    image: trail-incidents-backend:latest
