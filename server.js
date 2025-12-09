@@ -25,11 +25,11 @@ if (!DATABASE_URL) {
 const isLocalDB = DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1');
 
 const sequelize = new Sequelize(DATABASE_URL, {
-  dialect: 'postgresql',
-  dialectOptions: isLocalDB ? {} : {
+  dialect: 'postgres',
+  dialectOptions: {
     ssl: {
       require: true,
-      rejectUnauthorized: false
+      rejectUnauthorized: false // Accept self-signed certificates
     }
   },
   logging: false, // Set to console.log to see SQL queries
@@ -41,13 +41,21 @@ const sequelize = new Sequelize(DATABASE_URL, {
   }
 });
 
-// Test database connection
+// Test database connection with enhanced logging
+console.log("🔍 Attempting database connection...");
+console.log("📋 DATABASE_URL format:", DATABASE_URL ? DATABASE_URL.substring(0, 30) + "..." : "MISSING");
+console.log("📋 SSL Enabled:", !isLocalDB);
+
 sequelize.authenticate()
   .then(() => {
-    console.log("✅ Connected to PostgreSQL database");
+    console.log("✅ Connected to PostgreSQL database successfully!");
   })
   .catch((err) => {
-    console.error("❌ PostgreSQL connection error:", err.message);
+    console.error("❌ PostgreSQL connection error!");
+    console.error("Error Name:", err.name);
+    console.error("Error Message:", err.message);
+    console.error("Error Code:", err.code || "N/A");
+    console.error("Full Error:", err);
     process.exit(1);
   });
 
