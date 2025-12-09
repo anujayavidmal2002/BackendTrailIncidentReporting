@@ -27,6 +27,11 @@ const isLocalDB =
 
 const sequelize = new Sequelize(DATABASE_URL, {
   dialect: "postgres",
+  dialectOptions: isLocalDB ? {} : {
+    ssl: {
+      rejectUnauthorized: false
+    }
+  },
   logging: false,
   pool: {
     max: 5,
@@ -34,15 +39,8 @@ const sequelize = new Sequelize(DATABASE_URL, {
     acquire: 30000,
     idle: 10000,
   },
-  dialectOptions: isLocalDB
-    ? {} // no SSL for local DB
-    : {
-        ssl: {
-          require: true,
-          rejectUnauthorized: false, // important for self-signed certs
-        },
-      },
 });
+
 
 // Test database connection with enhanced logging
 console.log("🔍 Attempting database connection...");
