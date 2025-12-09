@@ -297,6 +297,17 @@ async function extractGpsFromFiles(files = []) {
 app.use(cors());
 app.use(express.json());
 
+// Debug middleware: log incoming Authorization header to verify gateway forwarding
+app.use((req, res, next) => {
+  try {
+    console.log('➡️ Incoming request:', req.method, req.originalUrl);
+    console.log('   Authorization header:', req.headers.authorization || '<<missing>>');
+  } catch (e) {
+    // ignore logging errors
+  }
+  next();
+});
+
 // --- ROUTES ---
 // Get all incidents
 app.get("/api/incidents", async (req, res) => {
