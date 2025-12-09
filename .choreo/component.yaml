@@ -1,13 +1,6 @@
-# Choreo will auto-detect the Dockerfile and build the component
-# This file is a placeholder for component metadata
-
-# Note: Configure environment variables in Choreo Console:
-# - DATABASE_URL
-# - AWS_REGION
-# - AWS_S3_BUCKET  
-# - AWS_ACCESS_KEY_ID
-# - AWS_SECRET_ACCESS_KEY
-# - AWS_S3_PUBLIC_BASE_URL
-# - ASGARDEO_CLIENT_ID
-# - ASGARDEO_BASE_URL
-# - ASGARDEO_ORG
+# Choreo Component Configuration for Dockerfile-based Service
+# Choreo will automatically detect and build the Dockerfile
+implementation:
+  container:
+    # Docker image name (Choreo builds from Dockerfile)
+    image: trail-incidents-backend:latest
