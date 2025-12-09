@@ -22,31 +22,38 @@ if (!DATABASE_URL) {
 }
 
 // Check if it's a local or remote database
-const isLocalDB = DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1');
+const isLocalDB =
+  DATABASE_URL.includes("localhost") || DATABASE_URL.includes("127.0.0.1");
 
 const sequelize = new Sequelize(DATABASE_URL, {
-  dialect: 'postgres',
-  dialectOptions: {
-    ssl: {
-      require: true,
-      rejectUnauthorized: false // Accept self-signed certificates
-    }
-  },
-  logging: false, // Set to console.log to see SQL queries
+  dialect: "postgres",
+  logging: false,
   pool: {
     max: 5,
     min: 0,
     acquire: 30000,
-    idle: 10000
-  }
+    idle: 10000,
+  },
+  dialectOptions: isLocalDB
+    ? {} // no SSL for local DB
+    : {
+        ssl: {
+          require: true,
+          rejectUnauthorized: false, // important for self-signed certs
+        },
+      },
 });
 
 // Test database connection with enhanced logging
 console.log("🔍 Attempting database connection...");
-console.log("📋 DATABASE_URL format:", DATABASE_URL ? DATABASE_URL.substring(0, 30) + "..." : "MISSING");
+console.log(
+  "📋 DATABASE_URL format:",
+  DATABASE_URL ? DATABASE_URL.substring(0, 30) + "..." : "MISSING"
+);
 console.log("📋 SSL Enabled:", !isLocalDB);
 
-sequelize.authenticate()
+sequelize
+  .authenticate()
   .then(() => {
     console.log("✅ Connected to PostgreSQL database successfully!");
   })
@@ -60,66 +67,71 @@ sequelize.authenticate()
   });
 
 // Define Incident Model for PostgreSQL
-const Incident = sequelize.define('Incident', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
+const Incident = sequelize.define(
+  "Incident",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    type: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: false,
+    },
+    location: {
+      type: DataTypes.STRING,
+    },
+    locationText: {
+      type: DataTypes.STRING,
+    },
+    latitude: {
+      type: DataTypes.DOUBLE,
+      defaultValue: null,
+    },
+    longitude: {
+      type: DataTypes.DOUBLE,
+      defaultValue: null,
+    },
+    severity: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    date: {
+      type: DataTypes.STRING,
+    },
+    time: {
+      type: DataTypes.STRING,
+    },
+    status: {
+      type: DataTypes.STRING,
+      defaultValue: "Open",
+    },
+    photos: {
+      type: DataTypes.JSONB, // PostgreSQL JSONB for array of photo objects
+      defaultValue: [],
+    },
+    photoUrl: {
+      type: DataTypes.STRING,
+    },
+    photoKey: {
+      type: DataTypes.STRING,
+    },
   },
-  type: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  description: {
-    type: DataTypes.TEXT,
-    allowNull: false
-  },
-  location: {
-    type: DataTypes.STRING
-  },
-  locationText: {
-    type: DataTypes.STRING
-  },
-  latitude: {
-    type: DataTypes.DOUBLE,
-    defaultValue: null
-  },
-  longitude: {
-    type: DataTypes.DOUBLE,
-    defaultValue: null
-  },
-  severity: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  date: {
-    type: DataTypes.STRING
-  },
-  time: {
-    type: DataTypes.STRING
-  },
-  status: {
-    type: DataTypes.STRING,
-    defaultValue: 'Open'
-  },
-  photos: {
-    type: DataTypes.JSONB, // PostgreSQL JSONB for array of photo objects
-    defaultValue: []
-  },
-  photoUrl: {
-    type: DataTypes.STRING
-  },
-  photoKey: {
-    type: DataTypes.STRING
+  {
+    tableName: "incidents",
+    timestamps: true, // Automatically adds createdAt and updatedAt
+    underscored: false, // Use camelCase field names
   }
-}, {
-  tableName: 'incidents',
-  timestamps: true, // Automatically adds createdAt and updatedAt
-  underscored: false // Use camelCase field names
-});
+);
 
 // Sync database (create tables if they don't exist)
-sequelize.sync()
+sequelize
+  .sync()
   .then(() => {
     console.log("✅ Database tables synced");
   })
@@ -291,7 +303,7 @@ app.use(express.json());
 app.get("/api/incidents", async (req, res) => {
   try {
     const incidents = await Incident.findAll({
-      order: [['createdAt', 'DESC']]
+      order: [["createdAt", "DESC"]],
     });
     res.json(incidents);
   } catch (err) {
@@ -494,7 +506,7 @@ app.put("/api/incidents/:id", upload.array("photos", 5), async (req, res) => {
       latitude,
       longitude,
     } = req.body;
-    
+
     if (type) incident.type = type;
     if (description) incident.description = description;
     if (location) incident.location = location;
@@ -510,14 +522,14 @@ app.put("/api/incidents/:id", upload.array("photos", 5), async (req, res) => {
     if (files.length) {
       try {
         const uploads = await Promise.all(files.map(uploadToS3));
-        
+
         // Delete old photos from S3
         if (incident.photos && incident.photos.length) {
           await Promise.all(incident.photos.map((p) => deleteFromS3(p.key)));
         } else if (incident.photoKey) {
           await deleteFromS3(incident.photoKey);
         }
-        
+
         incident.photos = uploads.map((u, idx) => ({
           url: u.url,
           key: u.key,
